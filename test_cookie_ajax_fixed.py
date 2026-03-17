@@ -76,7 +76,14 @@ async def test_cookie_ajax():
     # Đăng ký lắng nghe TRƯỚC khi goto
     page.on("response", handle_response)
 
-    await page.goto(CHAPTER_URL, wait_until="domcontentloaded")
+    try:
+        await page.goto(CHAPTER_URL, wait_until="domcontentloaded")
+    except Exception as e:
+        print(f"❌ Không thể mở trang: {e}")
+        print("   → Kiểm tra lại kết nối mạng hoặc thử HEADLESS = False trong config.py")
+        await page.close()
+        await browser.close()
+        return
 
     # Giả lập tương tác người dùng
     print("🖱️ Giả lập tương tác người dùng...")
