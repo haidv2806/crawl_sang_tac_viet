@@ -54,32 +54,62 @@ async def bypass_captcha_in_browser(page) -> dict:
     """
     Gọi endpoint bypass captcha từ BÊN TRONG trình duyệt bằng page.evaluate().
     Cookies của browser session được tự động đính kèm → đúng phiên làm việc.
+    Trường hợp token sai/hết hạn, sẽ hỏi user nhập mới.
     """
-    print("  🔓 Đang thực hiện bypass captcha từ browser context...")
-    result = await page.evaluate(f"""
-        async () => {{
-            try {{
-                const resp = await fetch(
-                    '{STV_BASE}/index.php?ngmar=verifyca',
-                    {{
-                        method: 'POST',
-                        headers: {{
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-Requested-With': 'XMLHttpRequest'
-                        }},
-                        body: 'ajax=verifycaptcha&token={BYPASS_TOKEN}&purpose=read&provider=sangtacviet',
-                        credentials: 'include'
-                    }}
-                );
-                const text = await resp.text();
-                return {{ status: resp.status, body: text }};
-            }} catch (e) {{
-                return {{ status: -1, body: String(e) }};
+    # Lấy token từ biến global của module (đã import từ core.config)
+    global BYPASS_TOKEN
+    
+    print(f"  🔓 Đang thực hiện bypass captcha từ browser context (Token: {BYPASS_TOKEN})...")
+    
+    while True:
+        result = await page.evaluate(f"""
+            async () => {{
+                try {{
+                    const resp = await fetch(
+                        '{STV_BASE}/index.php?ngmar=verifyca',
+                        {{
+                            method: 'POST',
+                            headers: {{
+                                'Content-Type': 'application/x-www-form-urlencoded',
+                                'X-Requested-With': 'XMLHttpRequest'
+                            }},
+                            body: 'ajax=verifycaptcha&token={BYPASS_TOKEN}&purpose=read&provider=sangtacviet',
+                            credentials: 'include'
+                        }}
+                    );
+                    const text = await resp.text();
+                    return {{ status: resp.status, body: text }};
+                }} catch (e) {{
+                    return {{ status: -1, body: String(e) }};
+                }}
             }}
-        }}
-    """)
-    print(f"     → Bypass status: {result.get('status')}, body: {result.get('body', '')[:100]}")
-    return result
+        """)
+        
+        status = result.get('status')
+        body = result.get('body', '')
+        print(f"     → Bypass status: {status}, body: {body[:100]}")
+        
+        # Kiểm tra nếu bypass thành công (chữ "success" thường có trong body)
+        if status == 200 and "success" in body.lower():
+            print("  ✅ Bypass captcha thành công!")
+            return result
+        
+        # Nếu thất bại, yêu cầu nhập token mới (để tránh block asyncio event loop, dùng run_in_executor)
+        print(f"  ❌ Bypass captcha thất bại. Token hiện tại ({BYPASS_TOKEN}) có thể đã cũ.")
+        
+        loop = asyncio.get_event_loop()
+        new_token = await loop.run_in_executor(
+            None, 
+            lambda: input("  → Nhập token bypass mới (nhấn Enter để bỏ qua bypass): ").strip()
+        )
+        
+        if not new_token:
+            print("  ⏭️ Bỏ qua bypass thủ công.")
+            return result
+            
+        # Cập nhật global token và thử lại
+        BYPASS_TOKEN = new_token
+        print(f"  🔄 Thử lại bypass với token mới: {BYPASS_TOKEN} ...")
 
 async def wait_for_ajax(captured: dict, timeout: float = 15.0) -> bool:
     """Chờ tối đa `timeout` giây cho đến khi AJAX được capture."""

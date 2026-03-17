@@ -1,38 +1,37 @@
 import os
 import sys
+import asyncio
+import json
 
 # Add project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.stv_browser import STVBrowser
-from bs4 import BeautifulSoup
-from core.config import STV_BASE
+from scrapers.stv_chapters import get_chapters
 
 async def test_chapters():
-    url = "https://sangtacviet.app/truyen/fanqie/1/7077757205902035998/"
-    browser = await STVBrowser.get_instance()
+    url = "https://sangtacviet.app/truyen/shu05/1/91929/"
     
-    print(f"🌍 Loading {url}")
-    html = await browser.get_content(
-        url, 
-        wait_selector=".listchapitem", 
-        click_selectors=["#clicktoexp"],
-        extra_wait=5.0
+    parts = url.strip("/").split("/")
+    if len(parts) >= 6:
+        host = parts[4]
+        book_id = parts[6] if len(parts) > 6 else parts[5]
+    else:
+        print("Invalid URL format")
+        return
+
+    print(f"🌍 Fetching chapters for {url} (host: {host}, book_id: {book_id})")
+    
+    chapters = await get_chapters(
+        book_url=url,
+        book_id=book_id,
+        host=host
     )
     
-    soup = BeautifulSoup(html, "html.parser")
-    
-    # Check directly for listchapitem
-    items = soup.find_all("a", class_="listchapitem")
-    print(f"Total listchapitem found: {len(items)}")
-    
-    container = soup.find("div", id="chaptercontainerinner")
-    print(f"chaptercontainerinner found: {container is not None}")
-    if container:
-        items_in = container.find_all("a", class_="listchapitem")
-        print(f"Items inside container: {len(items_in)}")
-        
-    await browser.close()
+    if chapters:
+        print(json.dumps(chapters, indent=2, ensure_ascii=False))
+        print(f"\nTotal chapters found: {len(chapters)}")
+    else:
+        print("No chapters found or error occurred.")
 
 if __name__ == "__main__":
     asyncio.run(test_chapters())

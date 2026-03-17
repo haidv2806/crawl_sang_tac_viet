@@ -203,6 +203,7 @@ async def crawl_book(book_url: str, chapter_limit: int | None = None):
 
     # 5. Chia volume va tao chuong
     total = len(chapters)
+    print (chapters[:10])
     for vol_start in range(0, total, CHAPTERS_PER_VOLUME):
         chunk = chapters[vol_start : vol_start + CHAPTERS_PER_VOLUME]
         vol_end  = vol_start + len(chunk)
@@ -229,7 +230,7 @@ async def crawl_book(book_url: str, chapter_limit: int | None = None):
                 continue
 
             chap_name_raw = result.get("chaptername") or title
-            chap_name = f"{chap_name_raw} #{idx}"
+            chap_name = f"{chap_name_raw}"
             content   = result.get("text", "")
             if not content:
                 print(f"  [{idx}/{total}] Noi dung trong, bo qua.")

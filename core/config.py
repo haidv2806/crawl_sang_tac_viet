@@ -1,9 +1,9 @@
 # config.py - Cấu hình crawler sangtacviet.app
 
-JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJqdGkiOiI0ZjZlNTViOS1iNjZlLTRlOTMtYWE1Mi05ZjRiOTk1MjU0ODkiLCJpYXQiOjE3NzM3NzMxMTgsImV4cCI6MTc3NjM2NTExOH0.ZqXGVJx5cr0N4_nVvCS8_2C5GUj2RFm1kFyE2WJOsQ8"
+JWT_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoyLCJqdGkiOiIxNWQwYjNlMi05NGEyLTRiZmYtOGExZi0zM2E0NDNkNzgzMzkiLCJpYXQiOjE3NzM3NzY3NzYsImV4cCI6MTc3NjM2ODc3Nn0.YTBkJXIgyglT4biDKsjX2KwFLmiYjAfH2Yy2lONEi8Q"
 
+# BASE_URL = "https://e-books.info.vn"
 BASE_URL = "http://localhost:3000"
-
 HEADERS = {
     "Authorization": f"Bearer {JWT_TOKEN}"
 }
@@ -11,7 +11,7 @@ HEADERS = {
 STV_BASE = "https://sangtacviet.app"
 
 # Cấu hình Browser
-HEADLESS = True  # False = hiển thị cửa sổ browser (tránh bị phát hiện là bot)
+HEADLESS = False  # False = hiển thị cửa sổ browser (tránh bị phát hiện là bot)
 BROWSER_TIMEOUT = 90000  # ms - tăng lên 90s để chờ JS render
 USER_DATA_DIR = "./browser_data" # Thư mục lưu session/cookies
 
