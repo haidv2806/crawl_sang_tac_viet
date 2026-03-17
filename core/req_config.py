@@ -5,13 +5,13 @@ import aiohttp
 import asyncio
 import time
 import datetime
-from core.config import RATE_LIMIT_BACKOFF_INITIAL, RATE_LIMIT_BACKOFF_MAX
+from core.config import RATE_LIMIT_BACKOFF_INITIAL, RATE_LIMIT_BACKOFF_MAX, TOKEN
 
 # ---- CAU HINH ----
 AUTH_FILE = "auth.json"
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
 STV_BASE = "https://sangtacviet.app"
-TOKEN = "GHLQ"
+
 
 class REQConfig:
     _cookies_str = None

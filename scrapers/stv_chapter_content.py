@@ -1,14 +1,8 @@
-# stv_chapter_content.py - Lay noi dung chuong tu sangtacviet.app (STVBrowser)
-#
-# Strategy:
-#   1. Su dung STVBrowser de mo trang chuong
-#   2. Cho JS render noi dung (AJAX)
-#   3. Parse truc tiep tu DOM (HTML full page)
-#   4. Ve sinh HTML (xoa span xam, xu ly the <i>)
-
 import re
 import os
 import sys
+import json
+import asyncio
 from bs4 import BeautifulSoup
 
 # Fix path to allow importing 'core' when running directly
@@ -17,9 +11,10 @@ if __name__ == "__main__" or "scrapers" in __file__:
 
 from core.stv_browser import STVBrowser
 from core.req_config import REQConfig
+from core.config import TOKEN as BYPASS_TOKEN
 
 STV_BASE = "https://sangtacviet.app"
-# AUTH_FILE removed, handled by stv_utils
+AJAX_KEYWORD = "sajax=readchapter"
 
 def parse_chapter_content_from_soup(soup: BeautifulSoup) -> str:
     """Parse selection from BeautifulSoup -> text thuan."""
@@ -55,6 +50,47 @@ def parse_chapter_content_from_soup(soup: BeautifulSoup) -> str:
     text = re.sub(r" {2,}", " ", text)
     return "\n\n".join(l.strip() for l in text.splitlines() if l.strip())
 
+async def bypass_captcha_in_browser(page) -> dict:
+    """
+    Gọi endpoint bypass captcha từ BÊN TRONG trình duyệt bằng page.evaluate().
+    Cookies của browser session được tự động đính kèm → đúng phiên làm việc.
+    """
+    print("  🔓 Đang thực hiện bypass captcha từ browser context...")
+    result = await page.evaluate(f"""
+        async () => {{
+            try {{
+                const resp = await fetch(
+                    '{STV_BASE}/index.php?ngmar=verifyca',
+                    {{
+                        method: 'POST',
+                        headers: {{
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }},
+                        body: 'ajax=verifycaptcha&token={BYPASS_TOKEN}&purpose=read&provider=sangtacviet',
+                        credentials: 'include'
+                    }}
+                );
+                const text = await resp.text();
+                return {{ status: resp.status, body: text }};
+            }} catch (e) {{
+                return {{ status: -1, body: String(e) }};
+            }}
+        }}
+    """)
+    print(f"     → Bypass status: {result.get('status')}, body: {result.get('body', '')[:100]}")
+    return result
+
+async def wait_for_ajax(captured: dict, timeout: float = 15.0) -> bool:
+    """Chờ tối đa `timeout` giây cho đến khi AJAX được capture."""
+    elapsed = 0.0
+    while elapsed < timeout:
+        if captured["response_text"] is not None:
+            return True
+        await asyncio.sleep(0.5)
+        elapsed += 0.5
+    return False
+
 async def get_chapter_content(
     book_id: str,
     host: str,
@@ -62,22 +98,76 @@ async def get_chapter_content(
     headless: bool = False, # Giữ tham số để không break code gọi đến
 ) -> dict:
     """
-    Lay noi dung chuong dung STVBrowser de render JS va parse truc tiep tu DOM.
+    Lay noi dung chuong dung STVBrowser.
+    Su dung co che intercept AJAX va page.evaluate bypass captcha hieu qua nhat.
     """
     chapter_url = f"{STV_BASE}/truyen/{host}/1/{book_id}/{chapter_c}/"
+    print(f"  [chapter] Lay noi dung: {chapter_url}")
     
-    print(f"  [chapter] Lay noi dung qua browser: {chapter_url}")
+    browser = await STVBrowser.get_instance()
+    page = await browser.get_page()
+    
+    # Biến lưu kết quả từ network intercept
+    captured = {"url": None, "response_text": None}
+
+    async def handle_response(response):
+        if AJAX_KEYWORD in response.url and response.request.method == "POST":
+            captured["url"] = response.url
+            try:
+                captured["response_text"] = await response.text()
+            except Exception as e:
+                captured["response_text"] = f"[Lỗi đọc response: {e}]"
+            print(f"  📡 Đã bắt AJAX: {response.url}")
+
+    page.on("response", handle_response)
     
     try:
-        browser = await STVBrowser.get_instance()
-        # Bypass captcha truoc moi lan cao chuong
-        await REQConfig.async_do_bypass()
-        # Chờ selector của content box xuat hien
-        html_content = await browser.get_content(chapter_url, wait_selector="#content-container .contentbox")
-        
-        if not html_content:
-            return {"code": "failed", "err": "Browser returned empty content"}
-            
+        try:
+            await page.goto(chapter_url, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            print(f"  ❌ Không thể mở trang: {e}")
+            return {"code": "failed", "err": f"Không thể mở trang: {e}"}
+
+        print("  🖱️ Giả lập tương tác người dùng...")
+        await browser.simulate_human_interaction(page, duration=5.0)
+
+        # Chờ AJAX lần đầu 
+        print("  ⏳ Chờ AJAX lần 1 (tối đa 10 giây)...")
+        got_data = await wait_for_ajax(captured, timeout=10.0)
+
+        # Kiểm tra captcha
+        if got_data:
+            try:
+                first_data = json.loads(captured["response_text"])
+                code = int(first_data.get("code", 0))
+            except Exception:
+                code = 0
+
+            if code in (7, 21):
+                print(f"  ⚠️ Server trả code {code} (captcha/rate-limit). Đang bypass...")
+                captured["url"] = None
+                captured["response_text"] = None
+
+                await bypass_captcha_in_browser(page)
+                await asyncio.sleep(1)
+
+                print("  🔄 Reload trang sau bypass captcha...")
+                await page.reload(wait_until="domcontentloaded")
+                await browser.simulate_human_interaction(page, duration=5.0)
+
+                print("  ⏳ Chờ AJAX lần 2 sau bypass (tối đa 15 giây)...")
+                await wait_for_ajax(captured, timeout=15.0)
+        else:
+            print("  ⚠️ Không nhận được AJAX lần đầu. Thử bypass captcha...")
+            await bypass_captcha_in_browser(page)
+            await asyncio.sleep(1)
+            await page.reload(wait_until="domcontentloaded")
+            await browser.simulate_human_interaction(page, duration=5.0)
+            await wait_for_ajax(captured, timeout=15.0)
+
+        # Cho JS render dom sau khi AJAX xong
+        await asyncio.sleep(3)
+        html_content = await page.content()
         soup = BeautifulSoup(html_content, "html.parser")
         
         # Extract book name and chapter name
@@ -87,53 +177,28 @@ async def get_chapter_content(
         book_name = book_name_el.get_text().strip() if book_name_el else ""
         chapter_name = chapter_name_el.get_text().strip() if chapter_name_el else ""
         
-        # Nếu chapter_name rỗng, JS chưa render kịp -> giả lập thêm và lấy lại content
-        if not chapter_name:
-            print(f"  ⚠️ Tên chương rỗng, thử giả lập thêm và lấy lại content...")
-            import asyncio as _asyncio
-            import random as _random
-            context = await browser.get_context()
-            pages = context.pages
-            if pages:
-                retry_page = pages[-1]  # trang vừa load (đã đóng? dùng page mới)
-            # Tạo page mới và load lại
-            retry_page = await browser.get_page()
-            try:
-                await retry_page.goto(chapter_url, wait_until="domcontentloaded", timeout=60000)
-                try:
-                    await retry_page.wait_for_selector("#content-container .contentbox", state="attached", timeout=30000)
-                except Exception:
-                    pass
-                await browser.simulate_human_interaction(retry_page, duration=_random.uniform(2.0, 4.0))
-                await _asyncio.sleep(3)
-                html_content = await retry_page.content()
-                soup = BeautifulSoup(html_content, "html.parser")
-                book_name_el = soup.select_one("#booknameholder")
-                chapter_name_el = soup.select_one("#bookchapnameholder")
-                book_name = book_name_el.get_text().strip() if book_name_el else book_name
-                chapter_name = chapter_name_el.get_text().strip() if chapter_name_el else ""
-                print(f"  🔄 Tên chương sau retry: '{chapter_name}'")
-            finally:
-                await retry_page.close()
-        
         text = parse_chapter_content_from_soup(soup)
         
         if not text or len(text) < 100:
-            # Check for error messages in page
             if "Vui lòng xác nhận" in html_content or "Cloudflare" in html_content:
-                 return {"code": "failed", "err": "Bi chan hoac yeu cau xac minh (Cloudflare/Human)"}
-
+                 return {"code": "failed", "err": "Bị chặn hoặc yêu cầu xác minh (Cloudflare/Human)"}
+                 
         return {
             "code":        "0",
             "bookname":    book_name,
             "chaptername": chapter_name,
             "text":        text,
-            "html":        html_content, # Giu lai de debug neu can
+            "html":        html_content, 
         }
         
     except Exception as e:
-        print(f"  ⚠️ Loi khi lay noi dung qua browser: {e}")
+        print(f"  ⚠️ Lỗi khi lấy nội dung qua browser: {e}")
         return {"code": "failed", "err": str(e)}
+    finally:
+        try:
+            await page.close()
+        except Exception:
+            pass
 
 
 async def close_browser():
@@ -144,10 +209,11 @@ if __name__ == "__main__":
     import asyncio
     
     async def _test():
-        result = await get_chapter_content("11319", "trxs2", "3")
+        result = await get_chapter_content("47055", "dich", "4") # Test với URL fix
         print(f"\ncode: {result.get('code')}")
         if result.get("code") == "0":
             print(f"bookname: {result.get('bookname')}")
+            print(f"chaptername: {result.get('chaptername')}")
             print(f"text length: {len(result['text'])}")
             print(f"Preview: {result['text'][:200]}")
         else:
